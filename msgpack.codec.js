@@ -34,11 +34,12 @@ function msgpackunpacker() {
         _cidx: 0    // chunk buffer[index] for stream
     };
 
-    that.feed = function(data) {
+    that.feed = function(data) { // @param BinaryString/ByteArray:
         var ary = typeof data === "string" ? toByteArray(data) : data;
         that._chunk = that._chunk.concat(ary);
     };
-    that.unpack = function() {
+    that.unpack = function() { // @return Mix/undefined:
+                               //         undefined is error return
         var r = msgpackunpack(that._chunk);
         if (r !== undefined) {
             that._cidx = _idx + 1;
