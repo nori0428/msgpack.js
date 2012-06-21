@@ -6,6 +6,7 @@
 this.msgpack || (function(globalScope) {
 
 globalScope.msgpack = {
+    _double:    msgpackdouble,  // double number wrapper
     unpacker:   msgpackunpacker,// stream deserializer
     pack:       msgpackpack,    // msgpack.pack(data:Mix,
                                 //              toString:Boolean = false):ByteArray/ByteString/false
@@ -24,8 +25,24 @@ var _bin2num    = {}, // BinaryStringToNumber   { "\00": 0, ... "\ff": 255 }
     _isArray    = Array.isArray || (function(mix) {
                     return Object.prototype.toString.call(mix) === "[object Array]";
                   }),
+    _isDouble   = (function(mix) {
+                    return mix instanceof msgpackdouble;
+                  }),
     _toString   = String.fromCharCode, // CharCode/ByteArray to String
     _MAX_DEPTH  = 512;
+
+// http://blog.livedoor.jp/dankogai/archives/50662064.html
+// http://labs.cybozu.co.jp/blog/kazuho/archives/2006/10/javascript_string.php
+function msgpackdouble(n) {
+    this._n = n;
+}
+msgpackdouble.prototype = new Number();
+msgpackdouble.prototype.valueOf = function() {
+    return this._n;
+};
+msgpackdouble.prototype.toString = function() {
+    return this._n.toString();
+};
 
 // msgpack.unpacker
 function msgpackunpacker() {
@@ -231,6 +248,41 @@ function encode(rv,      // @param ByteArray: result
                 for (i = 0; i < size; ++i) {
                     encode(rv, mix[i], depth);
                 }
+            } else if (_isDouble(mix)) { // force double
+                c = mix.valueOf();
+                // THX!! @edvakf
+                // http://javascript.g.hatena.ne.jp/edvakf/20101128/1291000731
+                sign = c < 0;
+                sign && (c *= -1);
+
+                // add offset 1023 to ensure positive
+                // 0.6931471805599453 = Math.LN2;
+                exp  = ((Math.log(c) / 0.6931471805599453) + 1023) | 0;
+
+                // shift 52 - (exp - 1023) bits to make integer part exactly 53 bits,
+                // then throw away trash less than decimal point
+                frac = c * Math.pow(2, 52 + 1023 - exp);
+
+                //  S+-Exp(11)--++-----------------Fraction(52bits)-----------------------+
+                //  ||          ||                                                        |
+                //  v+----------++--------------------------------------------------------+
+                //  00000000|00000000|00000000|00000000|00000000|00000000|00000000|00000000
+                //  6      5    55  4        4        3        2        1        8        0
+                //  3      6    21  8        0        2        4        6
+                //
+                //  +----------high(32bits)-----------+ +----------low(32bits)------------+
+                //  |                                 | |                                 |
+                //  +---------------------------------+ +---------------------------------+
+                //  3      2    21  1        8        0
+                //  1      4    09  6
+                low  = frac & 0xffffffff;
+                sign && (exp |= 0x800);
+                high = ((frac / 0x100000000) & 0xfffff) | (exp << 20);
+
+                rv.push(0xcb, (high >> 24) & 0xff, (high >> 16) & 0xff,
+                              (high >>  8) & 0xff,  high        & 0xff,
+                              (low  >> 24) & 0xff, (low  >> 16) & 0xff,
+                              (low  >>  8) & 0xff,  low         & 0xff);
             } else { // hash
                 // http://d.hatena.ne.jp/uupaa/20101129
                 pos = rv.length; // keep rewrite position
