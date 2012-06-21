@@ -6,7 +6,7 @@
 this.msgpack || (function(globalScope) {
 
 globalScope.msgpack = {
-    _double:    msgpackdouble,  // double number wrapper
+    todouble:   msgpackdouble,  // double number wrapper
     unpacker:   msgpackunpacker,// stream deserializer
     pack:       msgpackpack,    // msgpack.pack(data:Mix,
                                 //              toString:Boolean = false):ByteArray/ByteString/false
