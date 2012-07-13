@@ -543,7 +543,11 @@ function byteArrayToByteString(byteArray) { // @param ByteArray
                                             // @return String
     // http://d.hatena.ne.jp/uupaa/20101128
     try {
-        return _toString.apply(this, byteArray); // toString
+        var byteString = _toString.apply(this, byteArray); // toString
+        if (byteArray.length != byteString.length) {
+            throw 'toString failed';
+        }
+        return byteString;
     } catch(err) {
         ; // avoid "Maximum call stack size exceeded"
     }
