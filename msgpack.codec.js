@@ -484,34 +484,18 @@ function decode() { // @return Mix:
                     if (buflen < _idx + 1 + 1) {
                         return;
                     }
+                    // https://github.com/gochat-us/msgpack.js/commit/5201e722122cc57635380aa30f743710599dce8d
                     // make key/value pair
-                    size = buf[++_idx] - 0xa0;
-                    for (ary = [], i = _idx, iz = i + size; i < iz; ) {
-                        if (buflen < i + 1 + 1) {
-                            return;
-                        }
-                        c = buf[++i]; // lead byte
-                        if (c < 0x80) { // ASCII(0x00 ~ 0x7f)
-                            ary.push(c);
-                        } else if (c < 0xe0){
-                            if (buflen < i + 1 + 1) {
-                                return;
-                            }
-                            ary.push((c & 0x1f) <<  6 | (buf[++i] & 0x3f));
-                        } else {
-                            if (buflen < i + 2 + 1) {
-                                return;
-                            }
-                            ary.push(((c & 0x0f) << 12 | (buf[++i] & 0x3f) << 6
-                                                       | (buf[++i] & 0x3f)));
-                        }
-                    }
-                    _idx = i;
                     tmpr = decode();
                     if (tmpr === undefined) {
                         return;
                     }
-                    hash[_toString.apply(null, ary)] = tmpr;
+                    var tmpkey = tmpr;
+                    tmpr = decode();
+                    if (tmpr === undefined) {
+                        return;
+                    }
+                    hash[tmpkey] = tmpr;
                 }
                 return hash;
     // 0xdd: array32, 0xdc: array16, 0x90: array
