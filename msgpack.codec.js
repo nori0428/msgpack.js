@@ -6,7 +6,7 @@
 this.msgpack || (function(globalScope) {
 
 globalScope.msgpack = {
-    todouble:   msgpackdouble,  // double number wrapper
+    tofloat:    msgpackfloat,   // float number wrapper
     unpacker:   msgpackunpacker,// stream deserializer
     pack:       msgpackpack,    // msgpack.pack(data:Mix,
                                 //              toString:Boolean = false):ByteArray/ByteString/false
@@ -25,22 +25,22 @@ var _bin2num    = {}, // BinaryStringToNumber   { "\00": 0, ... "\ff": 255 }
     _isArray    = Array.isArray || (function(mix) {
                     return Object.prototype.toString.call(mix) === "[object Array]";
                   }),
-    _isDouble   = (function(mix) {
-                    return mix instanceof msgpackdouble;
+    _isFloat    = (function(mix) {
+                    return mix instanceof msgpackfloat;
                   }),
     _toString   = String.fromCharCode, // CharCode/ByteArray to String
     _MAX_DEPTH  = 512;
 
 // http://blog.livedoor.jp/dankogai/archives/50662064.html
 // http://labs.cybozu.co.jp/blog/kazuho/archives/2006/10/javascript_string.php
-function msgpackdouble(n) {
+function msgpackfloat(n) {
     this._n = n;
 }
-msgpackdouble.prototype = new Number();
-msgpackdouble.prototype.valueOf = function() {
+msgpackfloat.prototype = new Number();
+msgpackfloat.prototype.valueOf = function() {
     return this._n;
 };
-msgpackdouble.prototype.toString = function() {
+msgpackfloat.prototype.toString = function() {
     return this._n.toString();
 };
 
@@ -63,7 +63,7 @@ function msgpackunpacker() {
             that._chunk = that._chunk.slice(that._cidx);
             return r;
         }
-        return;
+        return undefined;
     };
     that.refresh = function() {
         that._chunk = [];
@@ -248,7 +248,7 @@ function encode(rv,      // @param ByteArray: result
                 for (i = 0; i < size; ++i) {
                     encode(rv, mix[i], depth);
                 }
-            } else if (_isDouble(mix)) { // force double
+            } else if (_isFloat(mix)) { // force float
                 c = mix.valueOf();
                 // THX!! @edvakf
                 // http://javascript.g.hatena.ne.jp/edvakf/20101128/1291000731
@@ -327,7 +327,7 @@ function decode() { // @return Mix:
         } else if (type < 0xa0) {   // FixArray (1001 xxxx)
             num  = type - 0x90;
             type = 0x90;
-        } else { // if (type < 0xc0) {   // FixRaw (101x xxxx)
+        } else { // if (type < 0xc0) {   // FixRaw (101x xxxx) => FixStr
             num  = type - 0xa0;
             type = 0xa0;
         }
@@ -443,17 +443,28 @@ function decode() { // @return Mix:
                 }
                 num  =  buf[++_idx];
                 return num < 0x80 ? num : num - 0x100; // 0x80 * 2
-    // 0xdb: raw32, 0xda: raw16, 0xa0: raw ( string )
+    // 0xc6: bin32, 0xdb: str32
+    case 0xc6:
     case 0xdb:
                 if (buflen < _idx + 4 + 1) {
                     return;
                 }
                 num +=  buf[++_idx] * 0x1000000 + (buf[++_idx] << 16);
+    // 0xc5: str16, 0xda: str16
+    case 0xc5:
     case 0xda:
                 if (buflen < _idx + 2 + 1) {
                     return;
                 }
-                num += (buf[++_idx] << 8)       +  buf[++_idx];
+                num += (buf[++_idx] << 8);
+    // 0xc4: str8, 0xd9: str8
+    case 0xc4:
+    case 0xd9:
+                if (buflen < _idx + 1) {
+                    return;
+                }
+                num += buf[++_idx];
+    // 0xa0: fixraw ( fixstr )
     case 0xa0:  // utf8.decode
                 if (buflen < _idx + num + 1) {
                     return;
