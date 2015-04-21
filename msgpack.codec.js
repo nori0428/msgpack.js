@@ -63,7 +63,7 @@ function msgpackunpacker() {
             that._chunk = that._chunk.slice(that._cidx);
             return r;
         }
-        return undefined;
+        return;
     };
     that.refresh = function() {
         that._chunk = [];
