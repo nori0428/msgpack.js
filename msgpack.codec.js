@@ -17,19 +17,31 @@ globalScope.msgpack = {
                                 //  [2][ByteArray to mix] msgpack.unpack([...]) -> {}
 };
 
-var _bin2num    = {}, // BinaryStringToNumber   { "\00": 0, ... "\ff": 255 }
-    _num2bin    = {}, // NumberToBinaryString   { 0: "\00", ... 255: "\ff" }
-    _buf        = [], // decode buffer
-    _idx        = 0,  // decode buffer[index]
-    _error      = 0,  // msgpack.pack() error code. 1 = CYCLIC_REFERENCE_ERROR
-    _isArray    = Array.isArray || (function(mix) {
-                    return Object.prototype.toString.call(mix) === "[object Array]";
-                  }),
-    _isFloat    = (function(mix) {
-                    return mix instanceof msgpackfloat;
-                  }),
-    _toString   = String.fromCharCode, // CharCode/ByteArray to String
-    _MAX_DEPTH  = 512;
+var _bin2num       = {}, // BinaryStringToNumber   { "\00": 0, ... "\ff": 255 }
+    _num2bin       = {}, // NumberToBinaryString   { 0: "\00", ... 255: "\ff" }
+    _buf           = [], // decode buffer
+    _idx           = 0,  // decode buffer[index]
+    _error         = 0,  // msgpack.pack() error code. 1 = CYCLIC_REFERENCE_ERROR
+    _isArray       = Array.isArray || (function(mix) {
+                       return Object.prototype.toString.call(mix) === "[object Array]";
+                     }),
+    _isFloat       = (function(mix) {
+                       return mix instanceof msgpackfloat;
+                     }),
+    _isArrayBuffer = (function(mix) {
+                       return (Object.prototype.toString.call(mix) === '[object ArrayBuffer]');
+                     }),
+    _isTypedArray  = (function(mix) {
+                       // IE ~9
+                       // Object.prototype.toString.call(undefined) === '[object Object]'
+                       // Object.prototype.toString.call(null) === '[object Object]'
+                       return (mix &&
+                               Object.prototype.toString.call(mix) !== '[object Object]' &&
+                               'buffer' in mix &&
+                               Object.prototype.toString.call(mix.buffer) === '[object ArrayBuffer]');
+                     }),
+    _toString      = String.fromCharCode, // CharCode/ByteArray to String
+    _MAX_DEPTH     = 512;
 
 // http://blog.livedoor.jp/dankogai/archives/50662064.html
 // http://labs.cybozu.co.jp/blog/kazuho/archives/2006/10/javascript_string.php
@@ -105,7 +117,7 @@ function msgpackunpack(data) { // @param BinaryString/ByteArray:
 function encode(rv,      // @param ByteArray: result
                 mix,     // @param Mix: source data
                 depth) { // @param Number: depth
-    var size, i, iz, c, pos,        // for UTF8.encode, Array.encode, Hash.encode
+    var size, i, iz, c, pos, ui8a,  // for UTF8.encode, Array.encode, Hash.encode, {ArrayBuffer, TypedArray}.encode
         high, low, sign, exp, frac; // for IEEE754
 
     if (mix == null) { // null or undefined -> 0xc0 ( null )
@@ -283,6 +295,24 @@ function encode(rv,      // @param ByteArray: result
                               (high >>  8) & 0xff,  high        & 0xff,
                               (low  >> 24) & 0xff, (low  >> 16) & 0xff,
                               (low  >>  8) & 0xff,  low         & 0xff);
+            } else if (_isArrayBuffer(mix) || _isTypedArray(mix)) { // ArrayBuffer or TypedArray
+                if (_isArrayBuffer(mix)) {
+                    ui8a = new Uint8Array(mix);
+                } else {
+                    ui8a = new Uint8Array(mix.buffer);
+                }
+                size = ui8a.byteLength;
+                if (size < 0x100) { // 8
+                    rv.push(0xc4, size & 0xff);
+                } else if (size < 0x10000) { // 16
+                    rv.push(0xc4, size >> 8, size & 0xff);
+                } else if (size < 0x100000000) { // 32
+                    rv.push(0xc6, size >>> 24, (size >> 16) & 0xff, (size >>  8) & 0xff, size & 0xff);
+                }
+                for (i = 0; i < size; i++) {
+                    rv.push(ui8a[i]);
+                }
+                delete ui8a; // make sure
             } else { // hash
                 // http://d.hatena.ne.jp/uupaa/20101129
                 pos = rv.length; // keep rewrite position
@@ -443,22 +473,19 @@ function decode() { // @return Mix:
                 }
                 num  =  buf[++_idx];
                 return num < 0x80 ? num : num - 0x100; // 0x80 * 2
-    // 0xc6: bin32, 0xdb: str32
-    case 0xc6:
+    // 0xdb: str32
     case 0xdb:
                 if (buflen < _idx + 4 + 1) {
                     return;
                 }
                 num +=  buf[++_idx] * 0x1000000 + (buf[++_idx] << 16);
-    // 0xc5: str16, 0xda: str16
-    case 0xc5:
+    // 0xda: str16
     case 0xda:
                 if (buflen < _idx + 2 + 1) {
                     return;
                 }
                 num += (buf[++_idx] << 8);
-    // 0xc4: str8, 0xd9: str8
-    case 0xc4:
+    // 0xd9: str8
     case 0xd9:
                 if (buflen < _idx + 1) {
                     return;
@@ -483,6 +510,34 @@ function decode() { // @return Mix:
                                             ((c & 0x0f) << 12 | (buf[++i] & 0x3f) << 6
                                                               | (buf[++i] & 0x3f)));
                     }
+                }
+                _idx = i;
+                return ary.length < 10240 ? _toString.apply(null, ary)
+                                          : byteArrayToByteString(ary);
+    // 0xc6: bin32
+    case 0xc6:
+                if (buflen < _idx + 4 + 1) {
+                    return;
+                }
+                num +=  buf[++_idx] * 0x1000000 + (buf[++_idx] << 16);
+    // 0xc5: bin16
+    case 0xc5:
+                if (buflen < _idx + 2 + 1) {
+                    return;
+                }
+                num += (buf[++_idx] << 8);
+    // 0xc4: bin8
+    case 0xc4:
+                if (buflen < _idx + 1) {
+                    return;
+                }
+                num += buf[++_idx];
+                if (buflen < _idx + num + 1) {
+                    return;
+                }
+                for (ary = [], i = _idx, iz = i + num; i < iz; ) {
+                    c = buf[++i]; // lead byte
+                    ary.push(c);
                 }
                 _idx = i;
                 return ary.length < 10240 ? _toString.apply(null, ary)
